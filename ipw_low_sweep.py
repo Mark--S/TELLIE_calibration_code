@@ -38,14 +38,12 @@ if __name__=="__main__":
 
     #Fixed parameters
     delay = 1.0 # 1ms -> kHz
-    widths = range(cutoff-450,cutoff+361,15)
-    #widths = range(cutoff-250,cutoff+601,15)
 
     #run the initial setup on the scope
     usb_conn = scope_connections.VisaUSB()
     scope = scopes.Tektronix3000(usb_conn)
     ###########################################
-    scope_chan = 1 # We're using channel 1!
+    scope_chan = 4 # We're using channel 1!
     termination = 50 # Ohms
     trigger_level = 0.5 # half peak minimum
     falling_edge = True
@@ -58,10 +56,13 @@ if __name__=="__main__":
     half_length = record_length / 2 # For selecting region about trigger point
     ###########################################
     scope.unlock()
+    scope.set_active_channel(scope_chan)
+    #Turn off channel 1
+    scope.set_active_channel(1,active=False)
     scope.set_horizontal_scale(x_div_units)
     scope.set_horizontal_delay(x_offset) #shift to the left 2 units
     scope.set_channel_y(scope_chan, y_div_units, pos=2.5)
-    #scope.set_display_y(scope_chan, y_div_units, offset=y_offset)
+    scope.set_display_y(scope_chan, y_div_units, offset=y_offset)
     scope.set_channel_termination(scope_chan, termination)
     scope.set_single_acquisition() # Single signal acquisition mode
     scope.set_record_length(record_length)
@@ -72,8 +73,8 @@ if __name__=="__main__":
 
     #Create a new, timestamped, summary file
     timestamp = time.strftime("%y%m%d_%H.%M",time.gmtime())
-    sweep.check_dir('./April_20/low_intensity')
-    saveDir = sweep.check_dir("./April_20/low_intensity/Box_%02d/" % (box))
+    sweep.check_dir('./MasterMode/low_intensity')
+    saveDir = sweep.check_dir("./MasterMode/low_intensity/Box_%02d/" % (box))
     output_filename = "%s/Chan%02d_IPWlow_%s.dat" % (saveDir,channel,timestamp)
     #results = utils.PickleFile(output_filename, 1)
     
@@ -81,9 +82,13 @@ if __name__=="__main__":
     output_file.write("#PWIDTH\tPWIDTH Error\tPIN\tPIN Error\tWIDTH\tWIDTH Error\tRISE\tRISE Error\tFALL\tFALL Error\tAREA\tAREA Error\tMinimum\tMinimum Error\n")
 
     #Start scanning!
-    tmpResults = None
+    tmpResults = {}
+    tmpResults["peak"] = -1.0
+    widths = [int(options.cutoff)]
     t_start = time.time()
-    for width in widths:
+    while tmpResults["peak"] < -0.05:
+        widths.append(widths[-1]+50)
+	width = widths[-1]
         min_volt = None
         loopStart = time.time()
         if tmpResults!=None:
@@ -92,7 +97,7 @@ if __name__=="__main__":
             min_volt = float(tmpResults["peak"])
             if min_volt == 0: # If bad data set, make none
                 min_volt = 50e-3 # Used to be None - Changed for speed-up!
-        tmpResults = sweep.sweep(saveDir,box,channel,width,delay,scope,min_volt)
+        tmpResults = sweep.sweep(saveDir,box,channel,width,delay,scope,scope_chan,min_volt)
                 
         output_file.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"%(width, 0,
                                             tmpResults["pin"], tmpResults["pin error"],

@@ -71,7 +71,7 @@ def return_zero_result():
 def save_scopeTraces(fileName, scope, channel, noPulses):
     """Save a number of scope traces to file - uses compressed .pkl"""
     scope._get_preamble(channel)
-    results = utils.PickleFile(fileName, 1)
+    results = utils.PickleFile(fileName, [channel])
     results.add_meta_data("timeform_1", scope.get_timeform(channel))
 
     #ct = scope.acquire_time_check()
@@ -85,7 +85,7 @@ def save_scopeTraces(fileName, scope, channel, noPulses):
     for i in range(noPulses):
         try:
             ct = scope.acquire_time_check(timeout=.4)
-            results.add_data(scope.get_waveform(channel), 1)
+            results.add_data(scope.get_waveform(channel), channel)
         except Exception, e:
             print "Scope died, acquisition lost."
             print e
@@ -204,7 +204,7 @@ def find_and_set_scope_y_scale(channel,height,width,delay,scope,scaleGuess=None)
     sc.stop()
     return True
     
-def sweep(dir_out,box,channel,width,delay,scope,min_volt=None):
+def sweep(dir_out,box,channel,width,delay,scope,scope_chan,min_volt=None):
     """Perform a measurement using a default number of
     pulses, with user defined width, channel and rate settings.
     """
@@ -252,17 +252,17 @@ def sweep(dir_out,box,channel,width,delay,scope,min_volt=None):
     fname = "%sWidth%05d" % (directory,width)
     
     # Check scope
-    ck = find_and_set_scope_y_scale(1,height,width,delay,scope,scaleGuess=min_volt)
+    ck = find_and_set_scope_y_scale(scope_chan,height,width,delay,scope,scaleGuess=min_volt)
 
     if ck == True:
         print "Saving raw files to: %s..." % fname
         sc.fire_continuous()
         time.sleep(0.2)
-        save_ck = save_scopeTraces(fname, scope, 1, 100)
+        save_ck = save_scopeTraces(fname, scope, scope_chan, 100)
         sc.stop()
         if save_ck == True:
             # Calc and return params
-            x,y = calc.readPickleChannel(fname, 1)
+            x,y = calc.readPickleChannel(fname, scope_chan,[scope_chan])
             results = calc.dictionary_of_params(x,y)
             results["pin"] = pin[logical_channel]
             results["pin error"] = rms[logical_channel]
