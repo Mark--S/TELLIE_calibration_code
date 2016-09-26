@@ -203,8 +203,49 @@ def find_and_set_scope_y_scale(channel,height,width,delay,scope,scaleGuess=None)
     print "TOTAL FUNC TIME = %1.2f s" % (time.time() - func_time)
     sc.stop()
     return True
-    
-def sweep(dir_out,box,channel,width,delay,scope,scope_chan,min_volt=None):
+
+def read_pin():
+    '''Wait keep looking for pin. It will be retuned when the sequence ends
+    '''
+    pin, rms = None, None
+    try:
+        while (pin == None):
+            pin, rms, channel = sc.read_pin_sequence()
+    except KeyboardInterrupt:
+        print "Keyboard interrupt"
+    return int(pin), float(rms)
+
+def printParamsDict(dict, name):
+    """Print calculated parameters and print to screen"""
+    area, areaStd =dict["area"], dict["area error"]
+    rise, riseStd =dict["rise"], dict["rise error"]
+    fall, fallStd =dict["fall"], dict["fall error"]
+    width, widthStd= dict["width"], dict["width error"]
+    peak, peakStd =dict["peak"], dict["peak error"]
+    time, timeStd =dict["time"], dict["time error"]
+    pin, pinStd =dict["pin"], dict["pin error"]
+
+    print "%s:" % name
+    print "--------"
+    print "Pin  \t\t= %1.2f +/- %1.2f " % (pin, pinStd)
+    print "-"
+    print "Peak \t\t= %1.2f +/- %1.2f V" % (peak, peakStd)
+    print "Area \t\t= %1.2e +/- %1.2e Vs" % (area, areaStd)
+    print "Fall time \t= %1.2f +/- %1.2f ns" % (fall*1e9, fallStd*1e9)
+    print "Rise time \t= %1.2f +/- %1.2f ns" % (rise*1e9, riseStd*1e9)
+    print "Width \t\t= %1.2f +/- %1.2f ns" % (width*1e9, widthStd*1e9)
+    print "-"
+    print "Pulse sep \t= %1.2f +/- %1.2f ns" % (time*1e9, timeStd*1e9)
+
+def find_pulse(x, y, step_back = 500, step_forward = 500):
+    """Use differential to find the PMT pulse in the long trace"""
+    global pulse_edge
+    if pulse_edge == None:
+        pulse_edge = np.where(y[1,:] < -0.1)[0][0]
+        print pulse_edge
+    return x[pulse_edge-step_back:pulse_edge+step_forward], y[:,pulse_edge-step_back:pulse_edge+step_forward]
+
+def sweep(dir_out,box,channel,width,delay,scope,trig_channel,pmt_channel,min_volt=None):
     """Perform a measurement using a default number of
     pulses, with user defined width, channel and rate settings.
     """
@@ -242,8 +283,8 @@ def sweep(dir_out,box,channel,width,delay,scope,scope_chan,min_volt=None):
     pin = None
    # while not comms_flags.valid_pin(pin,channel):
     while pin==None:
-        pin,rms, _ = sc.tmp_read_rms()
-    print "PIN (sweep):",pin[logical_channel], rms[logical_channel]
+        pin,rms = read_pin()
+    print "PIN (sweep):",pin, rms
     sc.stop()
 
     # File system stuff
