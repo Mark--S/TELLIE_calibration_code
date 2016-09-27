@@ -34,12 +34,12 @@ def read_scope_scan(fname):
         if line[0]=="#":
             continue
         bits = line.split()
-        if len(bits)!=14:
+        if len(bits)!=16:
             continue
         # Append needs to all be done in one. If we make a dict 'results = {}' which we 
         # re-write and append it fills with all the same object and so we have multiple copies
         # of the same result.
-        resultsList.append({"ipw":int(bits[0]),"ipw_err": int(bits[1]),"pin":int(bits[2]),"pin_err":float(bits[3]),"width":float(bits[4]),"width_err":float(bits[5]),"rise":float(bits[6]),"rise_err":float(bits[7]),"fall":float(bits[8]),"fall_err":float(bits[9]),"area":float(bits[10]),"area_err":float(bits[11]),"mini":float(bits[12]),"mini_err":float(bits[13])})
+        resultsList.append({"ipw":int(bits[0]),"ipw_err": int(bits[1]),"pin":int(bits[2]),"pin_err":float(bits[3]),"width":float(bits[4]),"width_err":float(bits[5]),"rise":float(bits[6]),"rise_err":float(bits[7]),"fall":float(bits[8]),"fall_err":float(bits[9]),"area":float(bits[10]),"area_err":float(bits[11]),"mini":float(bits[12]),"mini_err":float(bits[13]),"time":float(bits[14]),"time_err":float(bits[15])})
     return resultsList
 
 def clean_data(res_list):
@@ -66,6 +66,9 @@ def clean_data(res_list):
         if res_list[i]["width"] < 3.5e-9 or res_list[i]["width_err"] > 1.5e-9:
             res_list[i]["width"] = 0
             res_list[i]["width_err"] = 0
+        if res_list[i]["time_err"] > res_list[i]["time"]:
+            res_list[i]["time"] = 0
+            res_list[i]["time_err"] = 0
     return res_list
 
 def get_gain(applied_volts):
@@ -74,8 +77,7 @@ def get_gain(applied_volts):
        taken July 2015 at site.
        See smb://researchvols.uscs.susx.ac.uk/research/neutrino_lab/SnoPlus/PmtCal.
     """
-    a, b, c = 12.5531, 12.8764, -1276.0
-    #a, b, c = 545.1, 13.65, 0
+    a, b, c = 12.5531, 12.8764, -1276.2
     gain = a*np.exp(b*applied_volts) + c
     return gain
 
@@ -117,10 +119,10 @@ def get_photons(volts_seconds,applied_volts):
     Can accept -ve or +ve pulse
     """
     impedence = 50.0 
-    eV = 1.602e-19
+    Q = 1.6e-19
     qe = 0.192 # @ 501nm
     gain = get_gain(applied_volts)
-    photons = np.fabs(volts_seconds) / (impedence * eV * gain * qe)
+    photons = np.fabs(volts_seconds) / (impedence * Q * gain * qe)
     return photons
 
 def set_style(gr,style=1,title_size=0.04):
@@ -190,6 +192,8 @@ if __name__=="__main__":
     parser = optparse.OptionParser()
     parser.add_option("-f", dest="file")
     parser.add_option("-s", dest="scope", default="Tektronix")
+    #How many steps to cut off at the low intensity end of the data until the PMT pulse is distinguishable
+    parser.add_option("-x", dest="cutSteps",default=0)
     (options,args) = parser.parse_args()
     
     if options.scope!="Tektronix" and options.scope!="LeCroy":
@@ -197,26 +201,12 @@ if __name__=="__main__":
         sys.exit()
 
     p =  options.file.split('/')
-    if len(p) == 3:
-        sweep_type = p[0]
-        file_name = p[1]
-        box = int(p[1][-2:])
-        channel = int(p[2][4:6])
-        logical_channel = (box-1) * 8 + channel
-        time_str = p[2][-16:-4]
-        dirname = os.path.join(sweep_type,"plots/channel_%02d"%logical_channel)
-        out_dir = os.path.join(sweep_type, "plots/")
-        print sweep_type, file_name, box, channel, logical_channel, time_str
-    elif len(p) == 4:
-        sweep_type = p[1]
-        file_name = p[2]
-        box = int(p[2][-2:])
-        channel = int(p[3][4:6])
-        logical_channel = (box-1) * 8 + channel
-        time_str = p[3][-16:-4]
-        dirname = os.path.join("%s/%s/plots/channel_%02d"%(p[0],sweep_type,logical_channel))
-        out_dir = os.path.join("%s/%s/plots/"%(p[0],sweep_type))
-        print p[0], sweep_type, file_name, box, channel, logical_channel, time_str
+    sweep_type = p[0]
+    file_name = p[1]
+    box = int(p[1][-2:])
+    channel = int(p[2][4:6])
+    logical_channel = (box-1) * 8 + channel
+    print sweep_type, file_name, box, channel, logical_channel
 
     Voltage = 0
     if sweep_type=="low_intensity":
@@ -226,8 +216,16 @@ if __name__=="__main__":
     else:
         raise Exception,"unknown sweep type %s"%(sweep_type)
 
+    dirname = os.path.join(sweep_type,"plots/channel_%02d"%logical_channel)
+
     res_list = read_scope_scan(options.file)
     res_list = clean_data(res_list)
+    #Slice res_list upto where area=0
+    cutIter = 0
+    for cutIter in range(0,len(res_list)):
+	if res_list[cutIter]["area"] == 0:
+	    break
+    res_list = res_list[:cutIter-int(options.cutSteps)]
 
     #make plots!
     photon_vs_pin = ROOT.TGraphErrors()
@@ -239,6 +237,7 @@ if __name__=="__main__":
     fall_vs_photon = ROOT.TGraphErrors()
     fall_vs_ipw = ROOT.TGraphErrors()
     pin_vs_ipw = ROOT.TGraphErrors()
+    time_vs_ipw = ROOT.TGraphErrors()
 
     w, ipw = np.zeros(len(res_list)), np.zeros(len(res_list))
     for i in range(len(res_list)):
@@ -254,7 +253,9 @@ if __name__=="__main__":
         fall_time_err = res_list[i]["fall_err"]*1e9
         width_time = res_list[i]["width"]*1e9
         width_time_err = res_list[i]["width_err"]*1e9
-        
+        pulse_sep = res_list[i]["time"]*1e9
+        pulse_sep_err = res_list[i]["time_err"]*1e9
+
         pin_vs_ipw.SetPoint(i,res_list[i]["ipw"],res_list[i]["pin"])
         pin_vs_ipw.SetPointError(i,0,res_list[i]["pin_err"])
 
@@ -274,10 +275,13 @@ if __name__=="__main__":
         width_vs_photon.SetPointError(i,photon_err,width_time_err)
         width_vs_ipw.SetPoint(i,res_list[i]["ipw"],width_time)
         width_vs_ipw.SetPointError(i,res_list[i]["ipw_err"],width_time_err)
+        time_vs_ipw.SetPoint(i,res_list[i]["ipw"],pulse_sep)
+        time_vs_ipw.SetPointError(i,res_list[i]["ipw_err"],pulse_sep_err)
         
         #For Cutoff calc
         w[i], ipw[i] = width_time, res_list[i]["ipw"]
         #print w[i], rise_time, fall_time
+
     set_style(pin_vs_ipw,1)
     set_style(photon_vs_pin,1)
     set_style(photon_vs_ipw,1)
@@ -287,6 +291,7 @@ if __name__=="__main__":
     set_style(fall_vs_ipw,1)
     set_style(width_vs_photon,1)
     set_style(width_vs_ipw,1)
+    set_style(time_vs_ipw,1)
 
     # Add titles and labels
     pin_vs_ipw.SetName("pin_vs_ipw")
@@ -316,6 +321,9 @@ if __name__=="__main__":
     fall_vs_ipw.SetName("fall_vs_ipw")
     fall_vs_ipw.GetXaxis().SetTitle("IPW (14 bit)")
     fall_vs_ipw.GetYaxis().SetTitle("Fall time (ns)")
+    time_vs_ipw.SetName("time_vs_ipw")
+    time_vs_ipw.GetXaxis().SetTitle("IPW (14 bit)")
+    time_vs_ipw.GetYaxis().SetTitle("Light generation delay (ns)")
 
     output_dir = os.path.join(dirname)
     if not os.path.exists(output_dir):
@@ -350,6 +358,9 @@ if __name__=="__main__":
     width_vs_ipw.Draw("ap")
     can.Print("%s/width_vs_ipw.pdf"%output_dir)
 
+    time_vs_ipw.Draw("ap")
+    can.Print("%s/time_vs_ipw.pdf"%output_dir)
+
     fout = ROOT.TFile("%s/plots.root"%output_dir,"recreate")
     
     photon_vs_pin.Write()
@@ -360,8 +371,11 @@ if __name__=="__main__":
     rise_vs_ipw.Write()
     fall_vs_photon.Write()
     fall_vs_ipw.Write()
+    time_vs_ipw.Write()
+    pin_vs_ipw.Write()
 
-    master_name = "%sChan%02d_%s.pdf" % (out_dir, logical_channel, time_str)
+    out_dir = os.path.join(sweep_type,"plots/")
+    master_name = "%sChan%02d_%s.pdf" % (out_dir, logical_channel, sweep_type)
     if sweep_type == "broad_sweep":
         cut = ipw[np.nonzero(w)[0][-1]]
         tmpCan = master_plot(master_name, photon_vs_ipw, width_vs_ipw, rise_vs_ipw, fall_vs_ipw, pin_vs_ipw, photon_vs_pin, cutoff=cut)
@@ -370,4 +384,4 @@ if __name__=="__main__":
     fout.Close()
 
     time.sleep(2)
-    os.system("open %s"% master_name)  
+    #os.system("open %s"% master_name)  
